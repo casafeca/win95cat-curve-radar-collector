@@ -23,5 +23,5 @@ streams are free, but using the API key follows the current documented
 WebSocket connection format.
 
 The worker connects to PumpPortal, listens for migration events, enriches
-token names and symbols from launch metadata, deduplicates events and stores
-the latest 500 graduations in Upstash Redis.
+token names, symbols and creator-provided social links from launch metadata,
+deduplicates events and stores the latest 500 graduations in Upstash Redis.
