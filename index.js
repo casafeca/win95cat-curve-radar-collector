@@ -9,6 +9,7 @@ const MAX_ARCHIVE = 500;
 const RECONNECT_MS = 3000;
 const METADATA_LIMIT = 12000;
 const METADATA_FETCH_TIMEOUT_MS = 2500;
+const PUMP_COIN_API = "https://frontend-api-v3.pump.fun/coins";
 
 const redis = Redis.fromEnv();
 const metadata = new Map();
@@ -83,6 +84,23 @@ async function fetchTokenMetadata(event) {
   }
 }
 
+async function fetchPumpCoin(mint) {
+  try {
+    const response = await fetch(`${PUMP_COIN_API}/${encodeURIComponent(mint)}`, {
+      signal: AbortSignal.timeout(METADATA_FETCH_TIMEOUT_MS)
+    });
+    if (!response.ok) return {};
+    const payload = await response.json();
+    return {
+      name: payload.name || "",
+      symbol: payload.symbol || "",
+      ...socialFields(payload)
+    };
+  } catch {
+    return {};
+  }
+}
+
 function rememberMetadata(event) {
   const mint = mintOf(event);
   if (!mint) return;
@@ -140,6 +158,29 @@ async function storeMigration(event) {
   await redis.lpush(ARCHIVE_KEY, record);
   await redis.ltrim(ARCHIVE_KEY, 0, MAX_ARCHIVE - 1);
   log(`GRADUATION ${record.symbol} ${mint} event=${eventType(event) || "untyped"}`);
+  enrichStoredMigration(record).catch((error) => log(`enrichment error mint=${mint} ${error.message}`));
+}
+
+async function enrichStoredMigration(record) {
+  const fetched = await fetchPumpCoin(record.mint);
+  const enriched = {
+    ...record,
+    name: fetched.name || record.name,
+    symbol: fetched.symbol || record.symbol,
+    twitter: fetched.twitter || record.twitter,
+    website: fetched.website || record.website,
+    telegram: fetched.telegram || record.telegram
+  };
+  if (JSON.stringify(enriched) === JSON.stringify(record)) return;
+
+  const stored = await redis.lrange(ARCHIVE_KEY, 0, MAX_ARCHIVE - 1);
+  const index = stored.findIndex((item) => {
+    const parsed = typeof item === "string" ? JSON.parse(item) : item;
+    return parsed?.mint === record.mint;
+  });
+  if (index < 0) return;
+  await redis.lset(ARCHIVE_KEY, index, enriched);
+  log(`ENRICHED ${enriched.symbol} ${record.mint}`);
 }
 
 function connect() {
