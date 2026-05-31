@@ -15,6 +15,8 @@ const metadata = new Map();
 let socket;
 let reconnectTimer;
 let heartbeatTimer;
+let diagnosticsTimer;
+const packetTypes = new Map();
 
 function streamUrl() {
   const apiKey = process.env.PUMPPORTAL_API_KEY;
@@ -35,7 +37,16 @@ function eventType(event) {
 
 function isMigration(event) {
   const type = eventType(event);
-  return type.includes("migration") || type === "complete" || type === "create_pool";
+  if (type.includes("migration") || type === "complete" || type === "create_pool") return true;
+  // This socket subscribes only to new-token and migration streams. PumpPortal
+  // does not document the migration payload schema, so accept any mint-bearing
+  // packet that is not a creation or subscription confirmation.
+  return Boolean(mintOf(event) && type && type !== "create" && type !== "connected" && type !== "subscribed");
+}
+
+function countPacket(event) {
+  const type = eventType(event) || "untyped";
+  packetTypes.set(type, (packetTypes.get(type) || 0) + 1);
 }
 
 function safeHttpUrl(value) {
@@ -128,7 +139,7 @@ async function storeMigration(event) {
 
   await redis.lpush(ARCHIVE_KEY, record);
   await redis.ltrim(ARCHIVE_KEY, 0, MAX_ARCHIVE - 1);
-  log(`GRADUATION ${record.symbol} ${mint}`);
+  log(`GRADUATION ${record.symbol} ${mint} event=${eventType(event) || "untyped"}`);
 }
 
 function connect() {
@@ -146,9 +157,13 @@ function connect() {
   socket.on("message", async (raw) => {
     try {
       const event = JSON.parse(raw.toString());
+      countPacket(event);
       rememberMetadata(event);
       if (!isMigration(event)) enrichMetadata(event).catch(() => {});
-      if (isMigration(event)) await storeMigration(event);
+      if (isMigration(event)) {
+        log(`migration candidate event=${eventType(event) || "untyped"} mint=${mintOf(event) || "missing"}`);
+        await storeMigration(event);
+      }
     } catch (error) {
       log(`packet error: ${error instanceof Error ? error.message : "unknown"}`);
     }
@@ -169,6 +184,7 @@ process.on("SIGTERM", () => {
   log("shutdown requested.");
   clearTimeout(reconnectTimer);
   clearInterval(heartbeatTimer);
+  clearInterval(diagnosticsTimer);
   socket?.close();
   process.exit(0);
 });
@@ -177,5 +193,10 @@ heartbeatTimer = setInterval(() => {
   if (socket?.readyState !== WebSocket.OPEN) return;
   redis.set(HEARTBEAT_KEY, new Date().toISOString(), { ex: 90 }).catch((error) => log(`heartbeat error: ${error.message}`));
 }, 20_000);
+
+diagnosticsTimer = setInterval(() => {
+  const summary = [...packetTypes.entries()].map(([type, count]) => `${type}:${count}`).join(", ");
+  log(`packet summary ${summary || "no packets received"}`);
+}, 60_000);
 
 connect();

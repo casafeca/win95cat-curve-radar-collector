@@ -25,3 +25,4 @@ WebSocket connection format.
 The worker connects to PumpPortal, listens for migration events, enriches
 token names, symbols and creator-provided social links from launch metadata,
 deduplicates events and stores the latest 500 graduations in Upstash Redis.
+The logs print a packet-type summary every minute for production diagnostics.
