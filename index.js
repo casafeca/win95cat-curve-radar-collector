@@ -67,6 +67,10 @@ function socialFields(source = {}) {
   };
 }
 
+function imageField(source = {}) {
+  return safeHttpUrl(source.image_uri || source.image || source.imageUrl || source.image_url || source.icon || source.logo);
+}
+
 async function fetchTokenMetadata(event) {
   const uri = safeHttpUrl(event.uri || event.metadataUri || event.metadata_uri);
   if (!uri) return {};
@@ -77,6 +81,7 @@ async function fetchTokenMetadata(event) {
     return {
       name: payload.name || "",
       symbol: payload.symbol || "",
+      image: imageField(payload),
       ...socialFields(payload)
     };
   } catch {
@@ -94,6 +99,7 @@ async function fetchPumpCoin(mint) {
     return {
       name: payload.name || "",
       symbol: payload.symbol || "",
+      image: imageField(payload),
       ...socialFields(payload)
     };
   } catch {
@@ -109,6 +115,7 @@ function rememberMetadata(event) {
   metadata.set(mint, {
     symbol: event.symbol || event.tokenSymbol || existing.symbol || "UNKNOWN",
     name: event.name || event.tokenName || existing.name || "Unnamed token",
+    image: imageField(event) || existing.image || "",
     twitter: socials.twitter || existing.twitter || "",
     website: socials.website || existing.website || "",
     telegram: socials.telegram || existing.telegram || ""
@@ -127,6 +134,7 @@ async function enrichMetadata(event) {
     ...existing,
     name: fetched.name || existing.name || "Unnamed token",
     symbol: fetched.symbol || existing.symbol || "UNKNOWN",
+    image: fetched.image || existing.image || "",
     twitter: fetched.twitter || existing.twitter || "",
     website: fetched.website || existing.website || "",
     telegram: fetched.telegram || existing.telegram || ""
@@ -147,6 +155,7 @@ async function storeMigration(event) {
     symbol: event.symbol || event.tokenSymbol || cached.symbol || "UNKNOWN",
     signature: event.signature || event.tx || "",
     pool: event.pool || event.poolAddress || "",
+    image: imageField(event) || cached.image || "",
     twitter: safeHttpUrl(event.twitter) || cached.twitter || "",
     website: safeHttpUrl(event.website) || cached.website || "",
     telegram: safeHttpUrl(event.telegram) || cached.telegram || "",
@@ -167,6 +176,7 @@ async function enrichStoredMigration(record) {
     ...record,
     name: fetched.name || record.name,
     symbol: fetched.symbol || record.symbol,
+    image: fetched.image || record.image || "",
     twitter: fetched.twitter || record.twitter,
     website: fetched.website || record.website,
     telegram: fetched.telegram || record.telegram
@@ -181,6 +191,32 @@ async function enrichStoredMigration(record) {
   if (index < 0) return;
   await redis.lset(ARCHIVE_KEY, index, enriched);
   log(`ENRICHED ${enriched.symbol} ${record.mint}`);
+}
+
+async function backfillArchiveImages() {
+  try {
+    const stored = await redis.lrange(ARCHIVE_KEY, 0, 80);
+    for (let index = 0; index < stored.length; index += 1) {
+      const record = typeof stored[index] === "string" ? JSON.parse(stored[index]) : stored[index];
+      if (!record?.mint || record.image) continue;
+      const fetched = await fetchPumpCoin(record.mint);
+      const enriched = {
+        ...record,
+        name: fetched.name || record.name,
+        symbol: fetched.symbol || record.symbol,
+        image: fetched.image || record.image || "",
+        twitter: fetched.twitter || record.twitter,
+        website: fetched.website || record.website,
+        telegram: fetched.telegram || record.telegram
+      };
+      if (JSON.stringify(enriched) !== JSON.stringify(record)) {
+        await redis.lset(ARCHIVE_KEY, index, enriched);
+        log(`BACKFILLED IMAGE ${enriched.symbol} ${record.mint}`);
+      }
+    }
+  } catch (error) {
+    log(`archive image backfill error: ${error instanceof Error ? error.message : "unknown"}`);
+  }
 }
 
 function connect() {
@@ -241,3 +277,4 @@ diagnosticsTimer = setInterval(() => {
 }, 60_000);
 
 connect();
+backfillArchiveImages();
