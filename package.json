@@ -1,16 +1,117 @@
-{
-  "name": "win95cat-curve-radar-collector",
-  "version": "1.0.0",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "start": "node index.js"
-  },
-  "dependencies": {
-    "@upstash/redis": "^1.38.0",
-    "ws": "^8.18.3"
-  },
-  "engines": {
-    "node": ">=20"
-  }
-}
+import test from "node:test";
+import assert from "node:assert/strict";
+import { classifyCoin } from "../src/signals.js";
+
+const now = Date.parse("2026-06-14T00:00:00Z");
+
+test("new linked coin becomes new launch signal", () => {
+  const result = classifyCoin({
+    created_timestamp: now - 10_000,
+    twitter: "https://x.com/a/status/1",
+    usd_market_cap: 2_000
+  }, now, "new");
+  assert.equal(result.signal, "new_launch");
+});
+
+test("completed new coin is ignored because it is no longer on bonding curve", () => {
+  const result = classifyCoin({
+    created_timestamp: now - 10_000,
+    twitter: "https://x.com/a/status/1",
+    usd_market_cap: 80_000,
+    complete: true
+  }, now, "new");
+  assert.equal(result.signal, null);
+  assert.equal(result.on_bonding_curve, false);
+});
+
+test("paused mayhem new coin is ignored", () => {
+  const result = classifyCoin({
+    created_timestamp: now - 10_000,
+    twitter: "https://x.com/a/status/1",
+    usd_market_cap: 2_000,
+    complete: false,
+    mayhem_state: "paused"
+  }, now, "new");
+  assert.equal(result.signal, null);
+  assert.equal(result.on_bonding_curve, true);
+  assert.equal(result.tradable_bonding_curve, false);
+  assert.equal(result.paused, true);
+});
+
+test("active mayhem new coin is ignored", () => {
+  const result = classifyCoin({
+    created_timestamp: now - 10_000,
+    twitter: "https://x.com/a/status/1",
+    usd_market_cap: 2_000,
+    complete: false,
+    mayhem_state: "active"
+  }, now, "new");
+  assert.equal(result.signal, null);
+  assert.equal(result.on_bonding_curve, true);
+  assert.equal(result.is_mayhem, true);
+  assert.equal(result.tradable_bonding_curve, false);
+});
+
+test("completed mayhem new coin is ignored", () => {
+  const result = classifyCoin({
+    created_timestamp: now - 10_000,
+    twitter: "https://x.com/a/status/1",
+    usd_market_cap: 2_000,
+    complete: false,
+    mayhem_state: "completed"
+  }, now, "new");
+  assert.equal(result.signal, null);
+  assert.equal(result.tradable_bonding_curve, false);
+});
+
+test("banned new coin is ignored", () => {
+  const result = classifyCoin({
+    created_timestamp: now - 10_000,
+    twitter: "https://x.com/a/status/1",
+    usd_market_cap: 2_000,
+    complete: false,
+    is_banned: true
+  }, now, "new");
+  assert.equal(result.signal, null);
+  assert.equal(result.tradable_bonding_curve, false);
+});
+
+test("old actively traded bonding-curve coin becomes revival", () => {
+  const result = classifyCoin({
+    created_timestamp: now - 24 * 3_600_000,
+    last_trade_timestamp: now - 30_000,
+    usd_market_cap: 20_000,
+    complete: false
+  }, now, "active", { market_cap_usd: 10_000, ath_usd: 10_000, complete: false });
+  assert.equal(result.signal, "revival");
+});
+
+test("ordinary low value active coin is ignored", () => {
+  const result = classifyCoin({
+    created_timestamp: now - 24 * 3_600_000,
+    last_trade_timestamp: now - 30_000,
+    usd_market_cap: 2_000
+  }, now, "active", { market_cap_usd: 2_000, ath_usd: 2_000 });
+  assert.equal(result.signal, null);
+});
+
+test("first observation of an old active coin only establishes baseline", () => {
+  const result = classifyCoin({
+    created_timestamp: now - 24 * 3_600_000,
+    last_trade_timestamp: now - 30_000,
+    usd_market_cap: 100_000,
+    complete: true
+  }, now, "active");
+  assert.notEqual(result.signal, "revival");
+});
+
+test("old completed coin is ignored even if active", () => {
+  const result = classifyCoin({
+    created_timestamp: now - 24 * 3_600_000,
+    last_trade_timestamp: now - 30_000,
+    usd_market_cap: 15_000,
+    complete: true
+  }, now, "active", { market_cap_usd: 14_500, ath_usd: 20_000, complete: true });
+  assert.equal(result.signal, null);
+  assert.equal(result.on_bonding_curve, false);
+});

@@ -1,0 +1,46 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { summarizeOrigin } from "../src/origin.js";
+
+test("summarizes Ansem style person reference", () => {
+  const result = summarizeOrigin({
+    name: "The Black Bull",
+    symbol: "ANSEM",
+    twitter: "https://x.com/Supermanonchain/status/2066909915688652852",
+    website: "https://x.com/blknoiz06/status/1911113724338790882"
+  });
+  assert.equal(result.origin_type, "person_reference");
+  assert.match(result.origin_summary, /Ansem/i);
+  assert.ok(result.origin_confidence >= 0.7);
+});
+
+test("summarizes Elon source posts", () => {
+  const result = summarizeOrigin({
+    name: "The White Musk",
+    symbol: "ELON",
+    twitter: "https://x.com/elonmusk/status/2066909702177362297"
+  });
+  assert.equal(result.origin_type, "elon_post");
+  assert.match(result.origin_summary, /Elon Musk/i);
+});
+
+test("summarizes animal meme origins", () => {
+  const result = summarizeOrigin({
+    name: "Nox",
+    symbol: "NOX",
+    twitter: "https://x.com/plugs0l/status/2066557661047361750",
+    description: "little cute black cat named nox going viral on tiktok with his ball"
+  });
+  assert.equal(result.origin_type, "animal_meme");
+  assert.match(result.origin_summary, /cat/i);
+});
+
+test("falls back to x post reference when only a source link is known", () => {
+  const result = summarizeOrigin({
+    name: "Some Phrase",
+    symbol: "SP",
+    twitter: "https://x.com/randomacct/status/1"
+  });
+  assert.equal(result.origin_type, "x_post_reference");
+  assert.ok(result.origin_confidence > 0.4);
+});

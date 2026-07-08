@@ -1,30 +1,44 @@
-# WIN95CAT Curve Radar Collector
+# Pump Platform Radar
 
-Always-on Pump.fun migration collector for Render Background Worker.
+Pump.fun bonding-curve token radar.
 
-## Render settings
+This service watches Pump API coin lists and writes local JSONL signals for new linked launches and selected revival events.
 
-- Service type: `Background Worker`
-- Language: `Node`
-- Build command: `npm install`
-- Start command: `npm start`
-- Instance count: `1`
+## Current Filters
 
-## Environment variables
+- Only bonding-curve tokens are emitted.
+- Completed tokens are ignored.
+- Banned tokens are ignored.
+- All Mayhem tokens are ignored. Any token with `mayhem_state` is filtered out, including `active`, `paused`, `complete`, and `completed`.
+- Tokens need at least one source link (`twitter` or `website`) for `new_launch`.
 
-```text
-UPSTASH_REDIS_REST_URL
-UPSTASH_REDIS_REST_TOKEN
-PUMPPORTAL_API_KEY
+## Commands
+
+```bash
+node src/radar.js --once
+node src/radar.js
+node src/status.js
+node --test
 ```
 
-`PUMPPORTAL_API_KEY` should be created in PumpPortal. Migration and new-token
-streams are free, but using the API key follows the current documented
-WebSocket connection format.
+Or with npm:
 
-The worker connects to PumpPortal, listens for migration events, enriches
-token names, symbols and creator-provided social links from launch metadata,
-deduplicates events and stores the latest 500 graduations in Upstash Redis.
-The logs print a packet-type summary every minute for production diagnostics.
-If a migration packet has no name or ticker, the worker writes it immediately
-and then enriches the stored record from Pump.fun's public coin endpoint.
+```bash
+npm run once
+npm run start
+npm run status
+npm run test
+```
+
+## Data
+
+Runtime data is written to `data/` and should not be committed:
+
+- `data/platform-signals.jsonl`
+- `data/token-origin-summaries.jsonl`
+- `data/state.json`
+- `data/errors.jsonl`
+
+## Notes
+
+The radar is watch-only. It does not buy, sell, or launch tokens.
